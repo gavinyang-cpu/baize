@@ -1,4 +1,10 @@
-export { buildNotes, scanNotes, validateNotes } from "./rust.js";
+export {
+  buildNotes,
+  getBaizeRuntimeRoot,
+  scanNotes,
+  setBaizeRuntimeRoot,
+  validateNotes,
+} from "./rust.js";
 export {
   BAIZE_CONFIG_FILE,
   createDefaultConfig,

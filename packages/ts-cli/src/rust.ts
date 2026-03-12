@@ -1,21 +1,27 @@
 import { access } from "node:fs/promises";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import type { BuildReport, ScanReport, ValidationExecution } from "./types.js";
 
 const execFileAsync = promisify(execFile);
-const packageDir = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(packageDir, "../../..");
+let runtimeRoot = detectRuntimeRoot();
 const rustBinaryName = process.platform === "win32" ? "baize-cli.exe" : "baize-cli";
 
 type StructuredResult<T> = {
   exitCode: number;
   data: T;
 };
+
+export function setBaizeRuntimeRoot(root: string): void {
+  runtimeRoot = resolve(root);
+}
+
+export function getBaizeRuntimeRoot(): string {
+  return runtimeRoot;
+}
 
 export async function scanNotes(path: string): Promise<ScanReport> {
   const result = await runStructuredCommand<ScanReport>(["scan", path, "--json"]);
@@ -53,7 +59,7 @@ async function runStructuredCommand<T>(
 
   try {
     const { stdout } = await execFileAsync(invocation.command, invocation.args, {
-      cwd: repoRoot,
+      cwd: runtimeRoot,
       env: process.env,
       maxBuffer: 10 * 1024 * 1024,
     });
@@ -93,7 +99,7 @@ async function createInvocation(args: string[]): Promise<{
     return { command: explicitBinary, args };
   }
 
-  const targetBinary = join(repoRoot, "target", "debug", rustBinaryName);
+  const targetBinary = join(runtimeRoot, "target", "debug", rustBinaryName);
   if (await exists(targetBinary)) {
     return { command: targetBinary, args };
   }
@@ -164,4 +170,25 @@ function toString(value: string | Buffer | undefined): string {
   }
 
   return "";
+}
+
+function detectRuntimeRoot(): string {
+  const explicitRoot = process.env.BAIZE_WORKSPACE;
+  if (explicitRoot && explicitRoot.length > 0) {
+    return resolve(explicitRoot);
+  }
+
+  let current = resolve(process.cwd());
+  while (true) {
+    if (existsSync(join(current, "Cargo.toml")) && existsSync(join(current, "package.json"))) {
+      return current;
+    }
+
+    const parent = dirname(current);
+    if (parent === current) {
+      return resolve(process.cwd());
+    }
+
+    current = parent;
+  }
 }

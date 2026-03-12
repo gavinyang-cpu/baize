@@ -4,13 +4,30 @@ import { tmpdir } from "node:os";
 
 import { describe, expect, it } from "vitest";
 
-import { buildNotes, scanNotes, validateNotes } from "./index.js";
+import {
+  buildNotes,
+  getBaizeRuntimeRoot,
+  scanNotes,
+  setBaizeRuntimeRoot,
+  validateNotes,
+} from "./index.js";
 
 async function createVault(): Promise<string> {
   return mkdtemp(join(tmpdir(), "baize-ts-rust-"));
 }
 
 describe("Rust bridge", () => {
+  it("allows the runtime root to be overridden", async () => {
+    const original = getBaizeRuntimeRoot();
+    const vault = await createVault();
+
+    setBaizeRuntimeRoot(vault);
+    expect(getBaizeRuntimeRoot()).toBe(vault);
+
+    setBaizeRuntimeRoot(original);
+    expect(getBaizeRuntimeRoot()).toBe(original);
+  });
+
   it("scans notes through the Rust CLI", async () => {
     const vault = await createVault();
     await writeFile(

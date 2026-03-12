@@ -5,14 +5,15 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @baize/ts-cli",
-    "test": "npm run test -w @baize/ts-cli",
-    "typecheck": "npm run typecheck -w @baize/ts-cli",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "init": "npm run cli -w @baize/ts-cli -- init .",
     "scan": "npm run cli -w @baize/ts-cli -- scan .",
     "validate": "npm run cli -w @baize/ts-cli -- validate .",
     "ai": "npm run cli -w @baize/ts-cli -- ai . --artifact all",
     "build:astro": "npm run cli -w @baize/ts-cli -- build . --out-dir dist/astro-ts",
+    "build:plugin": "npm run build -w @baize/obsidian-plugin",
     "publish": "npm run cli -w @baize/ts-cli -- publish .",
     "mcp": "npm run mcp -w @baize/ts-cli"
   },

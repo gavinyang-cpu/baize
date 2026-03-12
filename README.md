@@ -23,11 +23,12 @@ What already works:
 - copy local assets into configured Astro public directories
 - generate AI summary, thread, and SEO artifacts with OpenAI or Ollama
 - publish through a profile-aware TypeScript CLI or MCP server
+- load a desktop-only Obsidian plugin scaffold with publish, validate, and AI commands
 
 What is not implemented yet:
 
 - remote publishing adapters
-- Obsidian plugin package
+- richer Obsidian plugin UX and release packaging
 - deeper Obsidian syntax support such as transclusions and callouts
 
 ## Why This Architecture
@@ -64,6 +65,14 @@ That keeps the parsing and validation logic in one place while still making the 
   - MCP stdio server exposing Baize tools to MCP clients
   - future integration point for plugin and adapter code
 
+### Obsidian Plugin
+
+- `@baize/obsidian-plugin`
+  - desktop-only plugin scaffold
+  - commands for publish current note or folder
+  - commands for validate, summary, thread, SEO, and full artifact generation
+  - settings for Baize workspace path and default publish profile
+
 ## Repository Layout
 
 ```text
@@ -72,6 +81,7 @@ baize/
     baize-core/        # Rust core library
     baize-cli/         # Rust CLI
   packages/
+    obsidian-plugin/   # Obsidian plugin scaffold
     ts-cli/            # TypeScript wrapper + Node CLI
   docs/plans/          # implementation plans
   obsidian_ai_publisher_prd.md
@@ -426,6 +436,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 npm run typecheck
 npm test
 npm run build
+npm run build:plugin
 
 # End-to-end
 npm run init
@@ -441,7 +452,7 @@ npm run publish
 This is still a foundation release. Right now Baize does not yet:
 
 - support direct publish adapters beyond Astro
-- ship the Obsidian plugin package and settings UI
+- polish the Obsidian plugin beyond a desktop-first scaffold
 - handle richer Obsidian syntax such as transclusions, callouts, and advanced embed variants
 - expose a native library boundary between Rust and TypeScript
 - manage Astro collections or site config beyond path-based publishing
@@ -461,7 +472,7 @@ These files capture the product direction and implementation plans:
 
 Near-term priorities:
 
-1. Scaffold the Obsidian plugin package on top of the TypeScript bridge.
+1. Polish the Obsidian plugin workflow with richer status UI and safer setup checks.
 2. Add deeper Obsidian syntax support and stronger validation around links and assets.
 3. Decide whether to keep shell-out orchestration or move to a tighter Rust/TS integration boundary.
 

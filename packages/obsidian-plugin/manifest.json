@@ -1,0 +1,9 @@
+{
+  "id": "baize-publisher",
+  "name": "Baize Publisher",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Profile-aware local publishing for Obsidian notes using Baize.",
+  "author": "Baize",
+  "isDesktopOnly": true
+}

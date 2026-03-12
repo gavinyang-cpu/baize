@@ -1,0 +1,14 @@
+{
+  "name": "@baize/obsidian-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit && node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.10",
+    "obsidian": "^1.8.10"
+  }
+}
