@@ -1,0 +1,21 @@
+{
+  "name": "baize",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @baize/ts-cli",
+    "test": "npm run test -w @baize/ts-cli",
+    "typecheck": "npm run typecheck -w @baize/ts-cli",
+    "scan": "npm run cli -w @baize/ts-cli -- scan .",
+    "validate": "npm run cli -w @baize/ts-cli -- validate .",
+    "build:astro": "npm run cli -w @baize/ts-cli -- build . --out-dir dist/astro-ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
