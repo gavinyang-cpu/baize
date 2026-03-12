@@ -70,9 +70,11 @@ pub fn validate_report(report: &ScanReport) -> ValidationReport {
 
 fn discover_markdown_files(input: &Path) -> Result<Vec<PathBuf>> {
     if input.is_file() {
-        return Ok(is_markdown_file(input)
-            .then(|| vec![input.to_path_buf()])
-            .unwrap_or_default());
+        return Ok(if is_markdown_file(input) {
+            vec![input.to_path_buf()]
+        } else {
+            Vec::new()
+        });
     }
 
     let files = WalkDir::new(input)
