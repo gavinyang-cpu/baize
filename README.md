@@ -24,6 +24,7 @@ What already works:
 - generate AI summary, thread, and SEO artifacts with OpenAI or Ollama
 - publish through a profile-aware TypeScript CLI or MCP server
 - load a desktop-only Obsidian plugin scaffold with publish, validate, and AI commands
+- run an end-to-end CLI smoke test that covers `init -> validate -> ai -> publish`
 
 What is not implemented yet:
 
@@ -72,6 +73,44 @@ That keeps the parsing and validation logic in one place while still making the 
   - commands for publish current note or folder
   - commands for validate, summary, thread, SEO, and full artifact generation
   - settings for Baize workspace path and default publish profile
+
+### Obsidian Plugin Setup
+
+The plugin is currently a local scaffold, not a packaged marketplace release.
+
+Build it from the repo root:
+
+```bash
+npm run build:plugin
+```
+
+That generates `packages/obsidian-plugin/main.js`.
+
+To load it in a local Obsidian vault:
+
+1. Create `.obsidian/plugins/baize-publisher/` inside the vault.
+2. Copy `packages/obsidian-plugin/manifest.json` into that folder.
+3. Copy `packages/obsidian-plugin/styles.css` into that folder.
+4. Copy the generated `packages/obsidian-plugin/main.js` into that folder.
+5. Enable `Baize Publisher` in Obsidian community plugins.
+
+Plugin settings:
+
+- `Baize workspace path`
+  - set this to the absolute path of the Baize workspace or install root
+  - leave it blank only if the current vault root is also the Baize workspace
+- `Default publish profile`
+  - profile name from `baize.config.json`, usually `main`
+
+Current plugin commands:
+
+- `Publish current note`
+- `Publish current folder`
+- `Validate current note`
+- `Generate summary`
+- `Generate thread`
+- `Generate SEO metadata`
+- `Generate all AI artifacts`
 
 ## Repository Layout
 
@@ -446,6 +485,8 @@ npm run ai
 npm run build:astro
 npm run publish
 ```
+
+Test coverage now includes a CLI end-to-end smoke test in `packages/ts-cli/src/e2e.test.ts`. It verifies a real temporary workspace flow: config init, validation, AI artifact generation, Astro publish output, and asset copying.
 
 ## Known Limitations
 
