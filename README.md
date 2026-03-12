@@ -57,6 +57,7 @@ That keeps the parsing and validation logic in one place while still making the 
 - `@baize/ts-cli`
   - typed wrapper around the Rust CLI JSON interface
   - Node CLI with the same `scan`, `validate`, and `build` flows
+  - MCP stdio server exposing Baize tools to MCP clients
   - future integration point for plugin and adapter code
 
 ## Repository Layout
@@ -162,6 +163,58 @@ npm run cli -w @baize/ts-cli -- build . --out-dir dist/astro-ts
 ```
 
 The TypeScript layer does not re-implement parsing or validation. It shells out to the Rust CLI, prefers the compiled Rust binary when present, and falls back to `cargo run -p baize-cli -- ...` otherwise.
+
+## MCP Support
+
+Baize now exposes a stdio MCP server through the TypeScript orchestration layer.
+
+Available MCP tools:
+
+- `baize_scan`
+- `baize_validate`
+- `baize_build`
+
+Each tool delegates to the same Rust-backed bridge used by the Node CLI, so MCP clients get the same parsing, validation, and build behavior as local shell usage.
+
+### Run the MCP server locally
+
+From the repo root:
+
+```bash
+npm run mcp
+```
+
+That starts a stdio MCP server intended to be launched by an MCP client, not used interactively in a normal terminal.
+
+### Example MCP client configuration
+
+```json
+{
+  "mcpServers": {
+    "baize": {
+      "command": "npm",
+      "args": ["run", "mcp", "-w", "@baize/ts-cli"],
+      "cwd": "/absolute/path/to/baize"
+    }
+  }
+}
+```
+
+If you prefer using the built artifact directly, build first and point the client at `packages/ts-cli/dist/mcp.js`.
+
+### MCP tool behavior
+
+- `baize_scan`
+  - input: `path`
+  - output: root path, note count, and compact note metadata
+- `baize_validate`
+  - input: `path`
+  - output: exit code, issue count, and validation issues
+- `baize_build`
+  - input: `path`, optional `out_dir`
+  - output: output directory, output count, and built file paths
+
+The MCP responses are intentionally compact and do not dump full note bodies into the model context by default.
 
 ## Markdown and Frontmatter
 

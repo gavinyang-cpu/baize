@@ -10,7 +10,8 @@
     "typecheck": "npm run typecheck -w @baize/ts-cli",
     "scan": "npm run cli -w @baize/ts-cli -- scan .",
     "validate": "npm run cli -w @baize/ts-cli -- validate .",
-    "build:astro": "npm run cli -w @baize/ts-cli -- build . --out-dir dist/astro-ts"
+    "build:astro": "npm run cli -w @baize/ts-cli -- build . --out-dir dist/astro-ts",
+    "mcp": "npm run mcp -w @baize/ts-cli"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
