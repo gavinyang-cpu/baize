@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -45,5 +45,18 @@ describe("TypeScript CLI", () => {
 
     expect(exitCode).toBe(2);
     expect(captured.stdout.join("\n")).toContain("Validation found 1 issue(s)");
+  });
+
+  it("creates a default config with init", async () => {
+    const workspace = await createVault();
+    const captured: Captured = { stdout: [], stderr: [] };
+
+    const exitCode = await runCli(["init", workspace], createLogger(captured));
+
+    expect(exitCode).toBe(0);
+    expect(captured.stdout.join("\n")).toContain("Created config");
+    expect(await readFile(join(workspace, "baize.config.json"), "utf8")).toContain(
+      "\"default_profile\": \"main\"",
+    );
   });
 });

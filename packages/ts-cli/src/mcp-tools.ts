@@ -1,6 +1,9 @@
 import { z } from "zod/v4";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
+import { createArtifactLoader, generateAiArtifacts } from "./ai.js";
+import { writeDefaultConfig } from "./config.js";
+import { publishWithProfile } from "./publish.js";
 import { buildNotes, scanNotes, validateNotes } from "./rust.js";
 
 const noteSummarySchema = z.object({
@@ -23,6 +26,23 @@ const buildOutputSchema = z.object({
   output_path: z.string(),
 });
 
+const artifactOutputSchema = z.object({
+  note_path: z.string(),
+  slug: z.string(),
+  artifact_dir: z.string(),
+  summary_path: z.string().optional(),
+  thread_path: z.string().optional(),
+  seo_path: z.string().optional(),
+});
+
+const publishOutputSchema = z.object({
+  note_path: z.string(),
+  slug: z.string(),
+  output_path: z.string(),
+  asset_count: z.number().int().nonnegative(),
+  warnings: z.array(z.string()),
+});
+
 export const scanToolInputSchema = {
   path: z.string().describe("Absolute or relative path to a Markdown file or directory."),
 };
@@ -37,6 +57,34 @@ export const buildToolInputSchema = {
     .string()
     .optional()
     .describe("Output directory for normalized Astro-ready Markdown files."),
+};
+
+export const initToolInputSchema = {
+  path: z
+    .string()
+    .optional()
+    .describe("Directory where baize.config.json should be created. Defaults to the current working directory."),
+  force: z.boolean().optional().describe("Overwrite an existing baize.config.json if true."),
+};
+
+export const aiToolInputSchema = {
+  path: z.string().describe("Absolute or relative path to a Markdown file or directory."),
+  artifact: z
+    .enum(["summary", "thread", "seo", "all"])
+    .optional()
+    .describe("Which artifact to generate. Defaults to all requested artifacts."),
+  provider: z
+    .enum(["openai", "ollama"])
+    .optional()
+    .describe("Optional AI provider override."),
+};
+
+export const publishToolInputSchema = {
+  path: z.string().describe("Absolute or relative path to a Markdown file or directory."),
+  profile: z
+    .string()
+    .optional()
+    .describe("Publish profile name from baize.config.json. Defaults to default_profile."),
 };
 
 export const scanToolOutputSchema = {
@@ -61,6 +109,34 @@ export const buildToolOutputSchema = {
   validation_issues: z.array(validationIssueSchema),
 };
 
+export const initToolOutputSchema = {
+  config_path: z.string(),
+  created: z.boolean(),
+};
+
+export const aiToolOutputSchema = {
+  path: z.string(),
+  provider: z.enum(["openai", "ollama"]),
+  model: z.string(),
+  artifact_dir: z.string(),
+  output_count: z.number().int().nonnegative(),
+  outputs: z.array(artifactOutputSchema),
+  warnings: z.array(z.string()),
+};
+
+export const publishToolOutputSchema = {
+  path: z.string(),
+  profile: z.string(),
+  mode: z.enum(["publish"]),
+  status: z.enum(["success", "warning", "failed"]),
+  output_dir: z.string(),
+  output_count: z.number().int().nonnegative(),
+  outputs: z.array(publishOutputSchema),
+  warnings: z.array(z.string()),
+  errors: z.array(z.string()),
+  hook_output: z.string().optional(),
+};
+
 type ScanToolArgs = {
   path: string;
 };
@@ -73,6 +149,40 @@ type BuildToolArgs = {
   path: string;
   out_dir?: string;
 };
+
+type InitToolArgs = {
+  path?: string;
+  force?: boolean;
+};
+
+type AiToolArgs = {
+  path: string;
+  artifact?: "summary" | "thread" | "seo" | "all";
+  provider?: "openai" | "ollama";
+};
+
+type PublishToolArgs = {
+  path: string;
+  profile?: string;
+};
+
+export async function handleInitTool({ path, force }: InitToolArgs) {
+  const result = await writeDefaultConfig(path ?? process.cwd(), { force });
+  const structuredContent = {
+    config_path: result.config_path,
+    created: result.created,
+  };
+
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: `${structuredContent.created ? "Created" : "Updated"} config at ${structuredContent.config_path}.`,
+      },
+    ],
+    structuredContent,
+  };
+}
 
 export async function handleScanTool({ path }: ScanToolArgs) {
   const report = await scanNotes(path);
@@ -154,7 +264,92 @@ export async function handleBuildTool({ path, out_dir }: BuildToolArgs) {
   };
 }
 
+export async function handleAiTool({ path, artifact, provider }: AiToolArgs) {
+  const result = await generateAiArtifacts(path, {
+    cwd: process.cwd(),
+    artifact,
+    provider,
+  });
+  const structuredContent = {
+    path,
+    provider: result.provider,
+    model: result.model,
+    artifact_dir: result.artifact_dir,
+    output_count: result.outputs.length,
+    outputs: result.outputs.map((output) => ({
+      note_path: output.note_path,
+      slug: output.slug,
+      artifact_dir: output.artifact_dir,
+      summary_path: output.summary_path,
+      thread_path: output.thread_path,
+      seo_path: output.seo_path,
+    })),
+    warnings: result.warnings,
+  };
+
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: formatAiSummary(structuredContent),
+      },
+    ],
+    structuredContent,
+  };
+}
+
+export async function handlePublishTool({ path, profile }: PublishToolArgs) {
+  const artifactLoader = await createArtifactLoader({
+    cwd: process.cwd(),
+    pathHint: path,
+  });
+  const result = await publishWithProfile(path, {
+    cwd: process.cwd(),
+    profile,
+    artifactLoader,
+  });
+  const structuredContent = {
+    path,
+    profile: result.profile,
+    mode: result.mode,
+    status: result.status,
+    output_dir: result.output_dir,
+    output_count: result.outputs.length,
+    outputs: result.outputs.map((output) => ({
+      note_path: output.note_path,
+      slug: output.slug,
+      output_path: output.output_path,
+      asset_count: output.assets.length,
+      warnings: output.warnings,
+    })),
+    warnings: result.warnings,
+    errors: result.errors,
+    hook_output: result.hook_output,
+  };
+
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: formatPublishSummary(structuredContent),
+      },
+    ],
+    structuredContent,
+  };
+}
+
 export function registerBaizeMcpTools(server: McpServer): void {
+  server.registerTool(
+    "baize_init",
+    {
+      title: "Baize Init",
+      description: "Create a starter baize.config.json file for profile-based publishing.",
+      inputSchema: initToolInputSchema,
+      outputSchema: initToolOutputSchema,
+    },
+    handleInitTool,
+  );
+
   server.registerTool(
     "baize_scan",
     {
@@ -188,6 +383,28 @@ export function registerBaizeMcpTools(server: McpServer): void {
       outputSchema: buildToolOutputSchema,
     },
     handleBuildTool,
+  );
+
+  server.registerTool(
+    "baize_ai",
+    {
+      title: "Baize AI",
+      description: "Generate AI summary, thread, and SEO artifacts for notes.",
+      inputSchema: aiToolInputSchema,
+      outputSchema: aiToolOutputSchema,
+    },
+    handleAiTool,
+  );
+
+  server.registerTool(
+    "baize_publish",
+    {
+      title: "Baize Publish",
+      description: "Publish notes to a configured Astro profile with asset rewriting.",
+      inputSchema: publishToolInputSchema,
+      outputSchema: publishToolOutputSchema,
+    },
+    handlePublishTool,
   );
 }
 
@@ -256,6 +473,59 @@ function formatBuildSummary(result: {
 
   for (const output of result.outputs) {
     lines.push(`- ${output.note_path} -> ${output.output_path}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatAiSummary(result: {
+  path: string;
+  provider: "openai" | "ollama";
+  model: string;
+  output_count: number;
+  outputs: Array<{ note_path: string; artifact_dir: string }>;
+  warnings: string[];
+}): string {
+  const lines = [
+    `Generated AI artifacts for ${result.output_count} note(s) from ${result.path} with ${result.provider}:${result.model}.`,
+  ];
+
+  for (const output of result.outputs) {
+    lines.push(`- ${output.note_path} -> ${output.artifact_dir}`);
+  }
+
+  for (const warning of result.warnings) {
+    lines.push(`warning: ${warning}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatPublishSummary(result: {
+  path: string;
+  profile: string;
+  status: "success" | "warning" | "failed";
+  output_count: number;
+  output_dir: string;
+  outputs: Array<{ note_path: string; output_path: string }>;
+  warnings: string[];
+  errors: string[];
+}): string {
+  const lines = [
+    `Published ${result.output_count} note(s) from ${result.path} to profile ${result.profile} (${result.status}).`,
+    `Output directory: ${result.output_dir}`,
+  ];
+
+  for (const output of result.outputs) {
+    lines.push(`- ${output.note_path} -> ${output.output_path}`);
+  }
+
+  for (const warning of result.warnings) {
+    lines.push(`warning: ${warning}`);
+  }
+
+  for (const error of result.errors) {
+    lines.push(`error: ${error}`);
   }
 
   return lines.join("\n");

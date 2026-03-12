@@ -18,15 +18,17 @@ What already works:
 - normalize notes into a structured model
 - validate duplicate slugs and note-level warnings
 - build Astro-ready Markdown files into a local output directory
-- call the Rust engine directly or through a TypeScript wrapper
+- create and load `baize.config.json` publish profiles
+- rewrite Obsidian wikilinks and local image embeds for Astro output
+- copy local assets into configured Astro public directories
+- generate AI summary, thread, and SEO artifacts with OpenAI or Ollama
+- publish through a profile-aware TypeScript CLI or MCP server
 
 What is not implemented yet:
 
-- asset copying and image rewriting
-- Astro publish profiles and site-specific config
 - remote publishing adapters
 - Obsidian plugin package
-- AI transformations at runtime
+- deeper Obsidian syntax support such as transclusions and callouts
 
 ## Why This Architecture
 
@@ -56,7 +58,9 @@ That keeps the parsing and validation logic in one place while still making the 
 
 - `@baize/ts-cli`
   - typed wrapper around the Rust CLI JSON interface
-  - Node CLI with the same `scan`, `validate`, and `build` flows
+  - Node CLI for `init`, `scan`, `validate`, `ai`, `build`, and `publish`
+  - profile-aware Astro publishing workflow
+  - AI artifact generation and storage
   - MCP stdio server exposing Baize tools to MCP clients
   - future integration point for plugin and adapter code
 
@@ -103,7 +107,15 @@ cd baize
 npm install
 ```
 
-### 3. Verify the project
+### 3. Create a starter config
+
+```bash
+npm run init
+```
+
+That writes `baize.config.json` in the repo root. Adjust the Astro paths before running `publish`.
+
+### 4. Verify the project
 
 ```bash
 cargo test
@@ -149,20 +161,69 @@ Notes on scanning:
 Baize also exposes the same flows through TypeScript:
 
 ```bash
+npm run init
 npm run scan
 npm run validate
+npm run ai
 npm run build:astro
+npm run publish
 ```
 
 You can also invoke the package-level CLI directly:
 
 ```bash
+npm run cli -w @baize/ts-cli -- init .
 npm run cli -w @baize/ts-cli -- scan .
 npm run cli -w @baize/ts-cli -- validate . --json
+npm run cli -w @baize/ts-cli -- ai . --artifact all
 npm run cli -w @baize/ts-cli -- build . --out-dir dist/astro-ts
+npm run cli -w @baize/ts-cli -- build . --profile main
+npm run cli -w @baize/ts-cli -- publish . --profile main
 ```
 
 The TypeScript layer does not re-implement parsing or validation. It shells out to the Rust CLI, prefers the compiled Rust binary when present, and falls back to `cargo run -p baize-cli -- ...` otherwise.
+
+### Profile Config
+
+Baize reads `baize.config.json` from the current project root or an ancestor of the note path.
+
+Example:
+
+```json
+{
+  "version": 1,
+  "default_profile": "main",
+  "profiles": {
+    "main": {
+      "adapter": "astro",
+      "content_dir": "./site/src/content/blog",
+      "assets_dir": "./site/public/images/posts",
+      "asset_url_base": "/images/posts",
+      "note_url_base": "/blog",
+      "build_command": "npm run build -w site"
+    }
+  },
+  "ai": {
+    "default_provider": "openai",
+    "artifact_dir": ".baize/artifacts",
+    "openai": {
+      "model": "gpt-5-mini",
+      "api_key_env": "OPENAI_API_KEY"
+    },
+    "ollama": {
+      "model": "llama3.2",
+      "base_url": "http://127.0.0.1:11434"
+    }
+  }
+}
+```
+
+Notes:
+
+- `build --profile <name>` writes Astro-ready files and copied assets without running the build hook
+- `publish --profile <name>` writes files, copies assets, and then runs `build_command` when configured
+- AI artifacts are stored under `.baize/artifacts/<slug>/`
+- OpenAI requires the env var named by `api_key_env`
 
 ## MCP Support
 
@@ -170,11 +231,14 @@ Baize now exposes a stdio MCP server through the TypeScript orchestration layer.
 
 Available MCP tools:
 
+- `baize_init`
 - `baize_scan`
 - `baize_validate`
 - `baize_build`
+- `baize_ai`
+- `baize_publish`
 
-Each tool delegates to the same Rust-backed bridge used by the Node CLI, so MCP clients get the same parsing, validation, and build behavior as local shell usage.
+Each tool delegates to the same Rust-backed bridge and TypeScript publish workflow used by the Node CLI, so MCP clients get the same parsing, validation, AI, and Astro publish behavior as local shell usage.
 
 ### Run the MCP server locally
 
@@ -204,6 +268,9 @@ If you prefer using the built artifact directly, build first and point the clien
 
 ### MCP tool behavior
 
+- `baize_init`
+  - input: optional `path`, optional `force`
+  - output: created config path
 - `baize_scan`
   - input: `path`
   - output: root path, note count, and compact note metadata
@@ -213,6 +280,12 @@ If you prefer using the built artifact directly, build first and point the clien
 - `baize_build`
   - input: `path`, optional `out_dir`
   - output: output directory, output count, and built file paths
+- `baize_ai`
+  - input: `path`, optional `artifact`, optional `provider`
+  - output: provider, artifact root, and generated artifact paths
+- `baize_publish`
+  - input: `path`, optional `profile`
+  - output: publish status, output directory, warnings, and built file paths
 
 The MCP responses are intentionally compact and do not dump full note bodies into the model context by default.
 
@@ -263,14 +336,19 @@ Current parser behavior:
 
 ## Build Output
 
-The current build step produces normalized Markdown files with generated frontmatter.
+Baize now has two build paths:
 
-For each source note, Baize writes:
+- low-level Rust `build` for normalized Markdown output
+- profile-aware TypeScript `build --profile <name>` for Astro-ready output with rewritten links, copied assets, and optional AI artifact frontmatter
+
+For profile-aware Astro output, Baize writes:
 
 - `title`
 - `slug`
 - `source_path`
 - `tags` when present
+- `publish_profile`
+- `summary`, `thread`, `description`, and `keywords` when AI artifacts exist
 
 Example output shape:
 
@@ -301,14 +379,26 @@ Build behavior:
 
 ## Programmatic TypeScript API
 
-The TypeScript package exports typed wrappers for the Rust engine:
+The TypeScript package exports typed wrappers for the Rust engine and publish workflow:
 
 ```ts
-import { scanNotes, validateNotes, buildNotes } from "@baize/ts-cli";
+import {
+  buildNotes,
+  buildWithProfile,
+  createArtifactLoader,
+  generateAiArtifacts,
+  publishWithProfile,
+  scanNotes,
+  validateNotes,
+} from "@baize/ts-cli";
 
 const scan = await scanNotes(".");
 const validation = await validateNotes(".");
 const build = await buildNotes(".", "dist/astro-ts");
+const ai = await generateAiArtifacts(".");
+const publish = await publishWithProfile(".", {
+  artifactLoader: await createArtifactLoader({ pathHint: "." }),
+});
 ```
 
 Useful exported types include:
@@ -318,6 +408,9 @@ Useful exported types include:
 - `ValidationExecution`
 - `BuildReport`
 - `NoteDocument`
+- `BaizeConfig`
+- `AiGenerationExecution`
+- `PublishExecution`
 
 ## Development Workflow
 
@@ -335,20 +428,23 @@ npm test
 npm run build
 
 # End-to-end
+npm run init
 npm run scan
 npm run validate
+npm run ai
 npm run build:astro
+npm run publish
 ```
 
 ## Known Limitations
 
 This is still a foundation release. Right now Baize does not yet:
 
-- parse Obsidian-specific embeds or wikilinks into publish-ready output
-- copy assets during build
-- manage Astro collections or site config
+- support direct publish adapters beyond Astro
+- ship the Obsidian plugin package and settings UI
+- handle richer Obsidian syntax such as transclusions, callouts, and advanced embed variants
 - expose a native library boundary between Rust and TypeScript
-- include a plugin UI or publish adapters beyond local Markdown output
+- manage Astro collections or site config beyond path-based publishing
 
 ## Project Documents
 
@@ -359,13 +455,14 @@ These files capture the product direction and implementation plans:
 - `obsidian_ai_publisher_prd_Rust.md`
 - `docs/plans/2026-03-12-bootstrap-foundation.md`
 - `docs/plans/2026-03-12-typescript-orchestrator.md`
+- `docs/plans/2026-03-12-core-mvp-publishing.md`
 
 ## Roadmap
 
 Near-term priorities:
 
-1. Add Astro-specific publish configuration and asset handling.
-2. Scaffold the Obsidian plugin package on top of the TypeScript bridge.
+1. Scaffold the Obsidian plugin package on top of the TypeScript bridge.
+2. Add deeper Obsidian syntax support and stronger validation around links and assets.
 3. Decide whether to keep shell-out orchestration or move to a tighter Rust/TS integration boundary.
 
 ## License

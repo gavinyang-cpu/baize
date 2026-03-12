@@ -8,9 +8,12 @@
     "build": "npm run build -w @baize/ts-cli",
     "test": "npm run test -w @baize/ts-cli",
     "typecheck": "npm run typecheck -w @baize/ts-cli",
+    "init": "npm run cli -w @baize/ts-cli -- init .",
     "scan": "npm run cli -w @baize/ts-cli -- scan .",
     "validate": "npm run cli -w @baize/ts-cli -- validate .",
+    "ai": "npm run cli -w @baize/ts-cli -- ai . --artifact all",
     "build:astro": "npm run cli -w @baize/ts-cli -- build . --out-dir dist/astro-ts",
+    "publish": "npm run cli -w @baize/ts-cli -- publish .",
     "mcp": "npm run mcp -w @baize/ts-cli"
   },
   "devDependencies": {
