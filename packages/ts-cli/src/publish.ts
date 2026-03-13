@@ -30,6 +30,7 @@ type RewriteContext = {
   assetUrlBase: string;
   noteUrlBase: string;
   noteLookup: Map<string, string>;
+  siblingLookup: Map<string, string>;
   note: NoteDocument;
 };
 
@@ -70,6 +71,7 @@ export async function publishNotes(
       assetUrlBase: normalizeUrlBase(profile.asset_url_base ?? "/images/posts"),
       noteUrlBase: normalizeUrlBase(profile.note_url_base ?? "/blog"),
       noteLookup,
+      siblingLookup: await buildSiblingNoteLookup(note, noteLookup),
       note,
     });
     const outputPath = join(contentDir, `${note.slug}.md`);
@@ -145,6 +147,44 @@ function buildNoteLookup(notes: NoteDocument[]): Map<string, string> {
   return lookup;
 }
 
+async function buildSiblingNoteLookup(
+  note: NoteDocument,
+  currentLookup: Map<string, string>,
+): Promise<Map<string, string>> {
+  const lookup = new Map<string, string>();
+  const noteDir = dirname(note.source_path);
+  const matches = [...note.body.matchAll(/(?<!!)\[\[([^[\]]+)\]\]/g)];
+
+  for (const match of matches) {
+    const rawTarget = match[1];
+    if (!rawTarget) {
+      continue;
+    }
+
+    const { target } = parseEmbedTarget(rawTarget);
+    const { noteTarget } = splitAnchor(target);
+    const normalizedTarget = normalizeLookupKey(stripExtension(noteTarget));
+    const basenameTarget = normalizeLookupKey(basename(stripExtension(noteTarget)));
+
+    if (currentLookup.has(normalizedTarget) || currentLookup.has(basenameTarget)) {
+      continue;
+    }
+    if (lookup.has(normalizedTarget) || lookup.has(basenameTarget)) {
+      continue;
+    }
+
+    const slug = await resolveSiblingLinkedSlug(noteDir, noteTarget);
+    if (!slug) {
+      continue;
+    }
+
+    lookup.set(normalizedTarget, slug);
+    lookup.set(basenameTarget, slug);
+  }
+
+  return lookup;
+}
+
 async function rewriteBody(body: string, context: RewriteContext): Promise<{
   body: string;
   assets: ArticleAsset[];
@@ -173,7 +213,11 @@ async function rewriteBody(body: string, context: RewriteContext): Promise<{
   nextBody = nextBody.replace(/\[\[([^[\]]+)\]\]/g, (full, rawTarget: string) => {
     const { target, label } = parseEmbedTarget(rawTarget);
     const { noteTarget, anchor } = splitAnchor(target);
-    const resolvedSlug = resolveLinkedSlug(noteTarget, context.noteLookup);
+    const resolvedSlug = resolveLinkedSlug(
+      noteTarget,
+      context.noteLookup,
+      context.siblingLookup,
+    );
     if (!resolvedSlug) {
       warnings.push(`could not resolve note link \`${target}\``);
       return full;
@@ -409,14 +453,52 @@ function splitAnchor(target: string): { noteTarget: string; anchor?: string } {
   };
 }
 
-function resolveLinkedSlug(target: string, lookup: Map<string, string>): string | undefined {
+function resolveLinkedSlug(
+  target: string,
+  lookup: Map<string, string>,
+  siblingLookup?: Map<string, string>,
+): string | undefined {
   const normalized = normalizeLookupKey(stripExtension(target));
-  return lookup.get(normalized) ?? lookup.get(normalizeLookupKey(basename(stripExtension(target))));
+  return (
+    lookup.get(normalized) ??
+    lookup.get(normalizeLookupKey(basename(stripExtension(target)))) ??
+    siblingLookup?.get(normalized) ??
+    siblingLookup?.get(normalizeLookupKey(basename(stripExtension(target))))
+  );
 }
 
 function stripExtension(path: string): string {
   const extension = extname(path);
   return extension.length > 0 ? path.slice(0, -extension.length) : path;
+}
+
+async function resolveSiblingLinkedSlug(
+  noteDir: string,
+  noteTarget: string,
+): Promise<string | undefined> {
+  for (const candidate of siblingNoteCandidates(noteDir, noteTarget)) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+
+    const report = await scanNotes(candidate);
+    const linked = report.notes[0];
+    if (linked) {
+      return linked.slug;
+    }
+  }
+
+  return undefined;
+}
+
+function siblingNoteCandidates(noteDir: string, noteTarget: string): string[] {
+  const direct = resolve(noteDir, noteTarget);
+  const withExtension =
+    extname(noteTarget).length > 0
+      ? []
+      : [resolve(noteDir, `${noteTarget}.md`), resolve(noteDir, `${noteTarget}.markdown`)];
+
+  return [direct, ...withExtension];
 }
 
 function normalizeLookupKey(value: string): string {

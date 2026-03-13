@@ -63,6 +63,32 @@ describe("publish pipeline", () => {
     expect(copiedAsset).toBe("fake image");
   });
 
+  it("resolves sibling wikilinks during single-note publish", async () => {
+    const workspace = await createWorkspace();
+    const vault = join(workspace, "vault");
+    await mkdir(vault, { recursive: true });
+    await writeConfig(workspace);
+    const notePath = join(vault, "note.md");
+    await writeFile(
+      notePath,
+      "---\ntitle: Main Note\n---\nBody with [[linked-note|Linked]]\n",
+      "utf8",
+    );
+    await writeFile(join(vault, "linked-note.md"), "---\ntitle: Linked Note\n---\nOther body\n", "utf8");
+
+    const result = await publishWithProfile(notePath, { cwd: workspace });
+
+    expect(result.status).toBe("success");
+    expect(result.outputs).toHaveLength(1);
+    expect(result.warnings).toEqual([]);
+
+    const noteOutput = await readFile(
+      join(workspace, "site", "src", "content", "blog", "main-note.md"),
+      "utf8",
+    );
+    expect(noteOutput).toContain("[Linked](/writing/linked-note)");
+  });
+
   it("runs the configured build hook during publish", async () => {
     const workspace = await createWorkspace();
     const vault = join(workspace, "vault");
