@@ -5,6 +5,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs",
+    "test": "vitest run src",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

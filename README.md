@@ -71,6 +71,7 @@ That keeps the parsing and validation logic in one place while still making the 
 - `@baize/obsidian-plugin`
   - desktop-only plugin scaffold
   - commands for publish current note or folder
+  - command to verify workspace, config, profile, and Rust runtime setup
   - commands for validate, summary, thread, SEO, and full artifact generation
   - settings for Baize workspace path and default publish profile
 
@@ -104,6 +105,7 @@ Plugin settings:
 
 Current plugin commands:
 
+- `Check Baize setup`
 - `Publish current note`
 - `Publish current folder`
 - `Validate current note`

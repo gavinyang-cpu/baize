@@ -1,7 +1,7 @@
 import { access } from "node:fs/promises";
 import { constants, existsSync } from "node:fs";
 import { execFile } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import type { BuildReport, ScanReport, ValidationExecution } from "./types.js";
@@ -15,12 +15,50 @@ type StructuredResult<T> = {
   data: T;
 };
 
+export type BaizeRuntimeInspection = {
+  kind: "env" | "binary" | "cargo";
+  command: string;
+  source: string;
+  available: boolean;
+};
+
 export function setBaizeRuntimeRoot(root: string): void {
   runtimeRoot = resolve(root);
 }
 
 export function getBaizeRuntimeRoot(): string {
   return runtimeRoot;
+}
+
+export async function inspectBaizeRuntime(root: string = runtimeRoot): Promise<BaizeRuntimeInspection> {
+  const resolvedRoot = resolve(root);
+  const explicitBinary = process.env.BAIZE_RUST_CLI;
+  if (explicitBinary) {
+    return {
+      kind: "env",
+      command: explicitBinary,
+      source: "BAIZE_RUST_CLI",
+      available: await commandExists(explicitBinary),
+    };
+  }
+
+  const targetBinary = join(resolvedRoot, "target", "debug", rustBinaryName);
+  if (await exists(targetBinary)) {
+    return {
+      kind: "binary",
+      command: targetBinary,
+      source: "target/debug",
+      available: true,
+    };
+  }
+
+  const cargo = resolveCargoExecutable();
+  return {
+    kind: "cargo",
+    command: cargo,
+    source: "cargo",
+    available: await commandExists(cargo),
+  };
 }
 
 export async function scanNotes(path: string): Promise<ScanReport> {
@@ -127,6 +165,23 @@ function resolveCargoExecutable(): string {
 async function exists(path: string): Promise<boolean> {
   try {
     await access(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function commandExists(command: string): Promise<boolean> {
+  if (isAbsolute(command) || command.includes("/") || command.includes("\\")) {
+    return exists(command);
+  }
+
+  const resolver = process.platform === "win32" ? "where" : "which";
+  try {
+    await execFileAsync(resolver, [command], {
+      env: process.env,
+      maxBuffer: 1024 * 1024,
+    });
     return true;
   } catch {
     return false;

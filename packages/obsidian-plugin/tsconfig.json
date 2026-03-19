@@ -13,5 +13,8 @@
   "include": [
     "src/**/*.ts",
     "../ts-cli/src/**/*.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
   ]
 }

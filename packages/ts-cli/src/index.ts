@@ -1,6 +1,7 @@
 export {
   buildNotes,
   getBaizeRuntimeRoot,
+  inspectBaizeRuntime,
   scanNotes,
   setBaizeRuntimeRoot,
   validateNotes,

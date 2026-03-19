@@ -13,6 +13,13 @@ import {
 import { createArtifactLoader, generateAiArtifacts } from "../../ts-cli/src/ai.js";
 import { publishWithProfile } from "../../ts-cli/src/publish.js";
 import { setBaizeRuntimeRoot, validateNotes } from "../../ts-cli/src/rust.js";
+import {
+  checkBaizeSetup,
+  formatAiNotice,
+  formatPublishNotice,
+  formatSetupNotice,
+  formatValidationNotice,
+} from "./setup.js";
 
 interface BaizePluginSettings {
   workspacePath: string;
@@ -29,6 +36,12 @@ export default class BaizePlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+
+    this.addCommand({
+      id: "check-baize-setup",
+      name: "Check Baize setup",
+      callback: () => this.checkSetup(),
+    });
 
     this.addCommand({
       id: "publish-current-note",
@@ -98,7 +111,7 @@ export default class BaizePlugin extends Plugin {
   }
 
   private async publishPath(targetPath: string): Promise<void> {
-    const workspaceRoot = this.prepareRuntime();
+    const workspaceRoot = await this.prepareRuntime(targetPath);
     const artifactLoader = await createArtifactLoader({
       cwd: workspaceRoot,
       pathHint: targetPath,
@@ -113,39 +126,25 @@ export default class BaizePlugin extends Plugin {
       throw new Error(result.errors.join("; ") || "Publish failed.");
     }
 
-    const message =
-      result.status === "warning"
-        ? `Published ${result.outputs.length} note(s) with ${result.warnings.length} warning(s).`
-        : `Published ${result.outputs.length} note(s) to profile ${result.profile}.`;
-    new Notice(message, 8000);
+    new Notice(formatPublishNotice(result), 10000);
   }
 
   private async validatePath(targetPath: string): Promise<void> {
-    const workspaceRoot = this.prepareRuntime();
+    await this.prepareRuntime(targetPath);
     const result = await validateNotes(targetPath);
-    if (result.exitCode === 2) {
-      const firstIssue = result.report.issues[0]?.message ?? "Validation failed.";
-      new Notice(`Validation failed: ${firstIssue}`, 8000);
-      return;
-    }
-
-    new Notice("Validation passed.", 5000);
-    setBaizeRuntimeRoot(workspaceRoot);
+    new Notice(formatValidationNotice(result), result.exitCode === 2 ? 10000 : 8000);
   }
 
   private async generateArtifacts(
     targetPath: string,
     artifact: "summary" | "thread" | "seo" | "all",
   ): Promise<void> {
-    const workspaceRoot = this.prepareRuntime();
+    const workspaceRoot = await this.prepareRuntime(targetPath);
     const result = await generateAiArtifacts(targetPath, {
       cwd: workspaceRoot,
       artifact,
     });
-    new Notice(
-      `Generated ${artifact === "all" ? "AI artifacts" : artifact} for ${result.outputs.length} note(s).`,
-      8000,
-    );
+    new Notice(formatAiNotice(result, artifact), 10000);
   }
 
   private async withActiveFile(
@@ -166,10 +165,38 @@ export default class BaizePlugin extends Plugin {
     }
   }
 
-  private prepareRuntime(): string {
+  private async prepareRuntime(targetPath?: string): Promise<string> {
     const workspaceRoot = this.workspaceRoot();
+    const status = await checkBaizeSetup({
+      workspaceRoot,
+      pathHint: targetPath,
+      profile: this.settings.defaultProfile.trim() || undefined,
+    });
+    if (!status.ok) {
+      throw new Error(formatSetupNotice(status));
+    }
     setBaizeRuntimeRoot(workspaceRoot);
     return workspaceRoot;
+  }
+
+  private async checkSetup(): Promise<void> {
+    try {
+      const activeFile = this.app.workspace.getActiveFile();
+      const targetPath = activeFile ? this.absolutePath(activeFile.path) : this.workspaceRoot();
+      const workspaceRoot = this.workspaceRoot();
+      const status = await checkBaizeSetup({
+        workspaceRoot,
+        pathHint: targetPath,
+        profile: this.settings.defaultProfile.trim() || undefined,
+      });
+      if (status.ok) {
+        setBaizeRuntimeRoot(workspaceRoot);
+      }
+      new Notice(formatSetupNotice(status), status.ok ? 8000 : 10000);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`Setup check failed: ${message}`, 10000);
+    }
   }
 
   private workspaceRoot(): string {
