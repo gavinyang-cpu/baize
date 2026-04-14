@@ -89,6 +89,72 @@ describe("publish pipeline", () => {
     expect(noteOutput).toContain("[Linked](/writing/linked-note)");
   });
 
+  it("inlines sibling note transclusions during single-note publish", async () => {
+    const workspace = await createWorkspace();
+    const vault = join(workspace, "vault");
+    await mkdir(vault, { recursive: true });
+    await writeConfig(workspace);
+    const notePath = join(vault, "note.md");
+    await writeFile(
+      notePath,
+      "---\ntitle: Main Note\n---\nIntro before\n\n![[snippet]]\n",
+      "utf8",
+    );
+    await writeFile(
+      join(vault, "snippet.md"),
+      "---\ntitle: Snippet\n---\n## Snippet Heading\nBody with [[linked-note|Reference]] and ![[image.png]]\n",
+      "utf8",
+    );
+    await writeFile(join(vault, "linked-note.md"), "---\ntitle: Linked Note\n---\nOther body\n", "utf8");
+    await writeFile(join(vault, "image.png"), "fake image", "utf8");
+
+    const result = await publishWithProfile(notePath, { cwd: workspace });
+
+    expect(result.status).toBe("success");
+    expect(result.outputs).toHaveLength(1);
+    expect(result.warnings).toEqual([]);
+
+    const noteOutput = await readFile(
+      join(workspace, "site", "src", "content", "blog", "main-note.md"),
+      "utf8",
+    );
+    expect(noteOutput).toContain("Intro before");
+    expect(noteOutput).toContain("## Snippet Heading");
+    expect(noteOutput).toContain("[Reference](/writing/linked-note)");
+    expect(noteOutput).toContain("![image.png](/images/posts/main-note/image.png)");
+    expect(noteOutput).not.toContain("![[snippet]]");
+
+    const copiedAsset = await readFile(
+      join(workspace, "site", "public", "images", "posts", "main-note", "image.png"),
+      "utf8",
+    );
+    expect(copiedAsset).toBe("fake image");
+  });
+
+  it("normalizes Obsidian callouts into standard Markdown blockquotes", async () => {
+    const workspace = await createWorkspace();
+    const vault = join(workspace, "vault");
+    await mkdir(vault, { recursive: true });
+    await writeConfig(workspace);
+    await writeFile(
+      join(vault, "callout.md"),
+      "---\ntitle: Callout Note\n---\n> [!tip] Publishing Tip\n> Keep the vault local.\n",
+      "utf8",
+    );
+
+    const result = await buildWithProfile(vault, { cwd: workspace });
+
+    expect(result.status).toBe("success");
+
+    const output = await readFile(
+      join(workspace, "site", "src", "content", "blog", "callout-note.md"),
+      "utf8",
+    );
+    expect(output).toContain("> **Tip:** Publishing Tip");
+    expect(output).toContain("> Keep the vault local.");
+    expect(output).not.toContain("[!tip]");
+  });
+
   it("runs the configured build hook during publish", async () => {
     const workspace = await createWorkspace();
     const vault = join(workspace, "vault");

@@ -20,6 +20,7 @@ What already works:
 - build Astro-ready Markdown files into a local output directory
 - create and load `baize.config.json` publish profiles
 - rewrite Obsidian wikilinks and local image embeds for Astro output
+- inline basic Obsidian note transclusions and normalize callouts for Astro output
 - copy local assets into configured Astro public directories
 - generate AI summary, thread, and SEO artifacts with OpenAI or Ollama
 - publish through a profile-aware TypeScript CLI or MCP server
@@ -30,7 +31,7 @@ What is not implemented yet:
 
 - remote publishing adapters
 - richer Obsidian plugin UX and release packaging
-- deeper Obsidian syntax support such as transclusions and callouts
+- deeper Obsidian syntax support such as heading/block transclusions and advanced embed variants
 
 ## Why This Architecture
 
@@ -384,6 +385,8 @@ Current parser behavior:
 - if the body is empty, the note gets a warning
 - if `publish.targets` is set and does not contain `astro`, the note gets a warning
 - unknown frontmatter keys are preserved in the parsed model
+- `![[note]]` transclusions are inlined when the target note can be resolved locally
+- `> [!note]` style callouts are normalized into standard Markdown blockquotes
 
 ## Build Output
 
@@ -496,7 +499,7 @@ This is still a foundation release. Right now Baize does not yet:
 
 - support direct publish adapters beyond Astro
 - polish the Obsidian plugin beyond a desktop-first scaffold
-- handle richer Obsidian syntax such as transclusions, callouts, and advanced embed variants
+- handle richer Obsidian syntax such as heading/block transclusions and advanced embed variants
 - expose a native library boundary between Rust and TypeScript
 - manage Astro collections or site config beyond path-based publishing
 
@@ -516,7 +519,7 @@ These files capture the product direction and implementation plans:
 Near-term priorities:
 
 1. Polish the Obsidian plugin workflow with richer status UI and safer setup checks.
-2. Add deeper Obsidian syntax support and stronger validation around links and assets.
+2. Add deeper Obsidian syntax support and stronger validation around anchors, transclusions, links, and assets.
 3. Decide whether to keep shell-out orchestration or move to a tighter Rust/TS integration boundary.
 
 ## License

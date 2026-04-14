@@ -29,9 +29,11 @@ type RewriteContext = {
   assetsDir?: string;
   assetUrlBase: string;
   noteUrlBase: string;
-  noteLookup: Map<string, string>;
-  siblingLookup: Map<string, string>;
-  note: NoteDocument;
+  noteLookup: Map<string, NoteDocument>;
+  hostNote: NoteDocument;
+  currentNote: NoteDocument;
+  copiedAssets: Map<string, ArticleAsset>;
+  visitedNotes: Set<string>;
 };
 
 export async function publishNotes(
@@ -71,8 +73,10 @@ export async function publishNotes(
       assetUrlBase: normalizeUrlBase(profile.asset_url_base ?? "/images/posts"),
       noteUrlBase: normalizeUrlBase(profile.note_url_base ?? "/blog"),
       noteLookup,
-      siblingLookup: await buildSiblingNoteLookup(note, noteLookup),
-      note,
+      hostNote: note,
+      currentNote: note,
+      copiedAssets: new Map<string, ArticleAsset>(),
+      visitedNotes: new Set([note.source_path]),
     });
     const outputPath = join(contentDir, `${note.slug}.md`);
     await writeFile(
@@ -133,14 +137,14 @@ function buildFailedResult(
   };
 }
 
-function buildNoteLookup(notes: NoteDocument[]): Map<string, string> {
-  const lookup = new Map<string, string>();
+function buildNoteLookup(notes: NoteDocument[]): Map<string, NoteDocument> {
+  const lookup = new Map<string, NoteDocument>();
   for (const note of notes) {
     const relativeWithoutExt = stripExtension(note.relative_path);
     const baseName = basename(relativeWithoutExt);
     const keys = [note.title, note.slug, relativeWithoutExt, baseName];
     for (const key of keys) {
-      lookup.set(normalizeLookupKey(key), note.slug);
+      lookup.set(normalizeLookupKey(key), note);
     }
   }
 
@@ -149,11 +153,11 @@ function buildNoteLookup(notes: NoteDocument[]): Map<string, string> {
 
 async function buildSiblingNoteLookup(
   note: NoteDocument,
-  currentLookup: Map<string, string>,
-): Promise<Map<string, string>> {
-  const lookup = new Map<string, string>();
+  currentLookup: Map<string, NoteDocument>,
+): Promise<Map<string, NoteDocument>> {
+  const lookup = new Map<string, NoteDocument>();
   const noteDir = dirname(note.source_path);
-  const matches = [...note.body.matchAll(/(?<!!)\[\[([^[\]]+)\]\]/g)];
+  const matches = [...note.body.matchAll(/!?\[\[([^[\]]+)\]\]/g)];
 
   for (const match of matches) {
     const rawTarget = match[1];
@@ -163,6 +167,9 @@ async function buildSiblingNoteLookup(
 
     const { target } = parseEmbedTarget(rawTarget);
     const { noteTarget } = splitAnchor(target);
+    if (!isLikelyNoteTarget(noteTarget)) {
+      continue;
+    }
     const normalizedTarget = normalizeLookupKey(stripExtension(noteTarget));
     const basenameTarget = normalizeLookupKey(basename(stripExtension(noteTarget)));
 
@@ -173,13 +180,13 @@ async function buildSiblingNoteLookup(
       continue;
     }
 
-    const slug = await resolveSiblingLinkedSlug(noteDir, noteTarget);
-    if (!slug) {
+    const linkedNote = await resolveSiblingLinkedNote(noteDir, noteTarget);
+    if (!linkedNote) {
       continue;
     }
 
-    lookup.set(normalizedTarget, slug);
-    lookup.set(basenameTarget, slug);
+    lookup.set(normalizedTarget, linkedNote);
+    lookup.set(basenameTarget, linkedNote);
   }
 
   return lookup;
@@ -190,13 +197,52 @@ async function rewriteBody(body: string, context: RewriteContext): Promise<{
   assets: ArticleAsset[];
   warnings: string[];
 }> {
-  const warnings: string[] = [];
-  const copiedAssets = new Map<string, ArticleAsset>();
-  const noteDir = dirname(context.note.source_path);
+  const rewritten = await rewriteNoteBody({
+    ...context,
+    currentNote: {
+      ...context.currentNote,
+      body,
+    },
+  });
 
-  let nextBody = body.replace(/!\[\[([^[\]]+)\]\]/g, (full, rawTarget: string) => {
+  return {
+    body: rewritten.body,
+    assets: [...context.copiedAssets.values()],
+    warnings: rewritten.warnings,
+  };
+}
+
+async function rewriteNoteBody(context: RewriteContext): Promise<{
+  body: string;
+  warnings: string[];
+}> {
+  const warnings: string[] = [];
+  const noteDir = dirname(context.currentNote.source_path);
+  const siblingLookup = await buildSiblingNoteLookup(context.currentNote, context.noteLookup);
+
+  let nextBody = await replaceAsync(context.currentNote.body, /!\[\[([^[\]]+)\]\]/g, async (full, rawTarget: string) => {
     const { target, label } = parseEmbedTarget(rawTarget);
-    const rewritten = copyAssetIfNeeded(target, label ?? basename(target), noteDir, context, copiedAssets, warnings);
+    const { noteTarget, anchor } = splitAnchor(target);
+    const transcludedNote = resolveLinkedNote(noteTarget, context.noteLookup, siblingLookup);
+    if (transcludedNote) {
+      if (anchor) {
+        warnings.push(formatRewriteWarning(context, `transclusion anchors are not supported for \`${target}\``));
+      }
+      if (context.visitedNotes.has(transcludedNote.source_path)) {
+        warnings.push(formatRewriteWarning(context, `skipping cyclic transclusion \`${target}\``));
+        return "";
+      }
+
+      const transcluded = await rewriteNoteBody({
+        ...context,
+        currentNote: transcludedNote,
+        visitedNotes: new Set([...context.visitedNotes, transcludedNote.source_path]),
+      });
+      warnings.push(...transcluded.warnings);
+      return `\n${transcluded.body.trim()}\n`;
+    }
+
+    const rewritten = copyAssetIfNeeded(target, label ?? basename(target), noteDir, context, warnings);
     return rewritten ?? full;
   });
 
@@ -206,31 +252,32 @@ async function rewriteBody(body: string, context: RewriteContext): Promise<{
       return full;
     }
 
-    const rewritten = copyAssetIfNeeded(target, alt || basename(target), noteDir, context, copiedAssets, warnings);
+    const rewritten = copyAssetIfNeeded(target, alt || basename(target), noteDir, context, warnings);
     return rewritten ?? full;
   });
 
   nextBody = nextBody.replace(/\[\[([^[\]]+)\]\]/g, (full, rawTarget: string) => {
     const { target, label } = parseEmbedTarget(rawTarget);
     const { noteTarget, anchor } = splitAnchor(target);
-    const resolvedSlug = resolveLinkedSlug(
+    const linkedNote = resolveLinkedNote(
       noteTarget,
       context.noteLookup,
-      context.siblingLookup,
+      siblingLookup,
     );
-    if (!resolvedSlug) {
-      warnings.push(`could not resolve note link \`${target}\``);
+    if (!linkedNote) {
+      warnings.push(formatRewriteWarning(context, `could not resolve note link \`${target}\``));
       return full;
     }
 
     const linkText = label ?? basename(noteTarget);
     const anchorSuffix = anchor ? `#${slugFragment(anchor)}` : "";
-    return `[${linkText}](${joinUrl(context.noteUrlBase, resolvedSlug)}${anchorSuffix})`;
+    return `[${linkText}](${joinUrl(context.noteUrlBase, linkedNote.slug)}${anchorSuffix})`;
   });
+
+  nextBody = rewriteCallouts(nextBody);
 
   return {
     body: nextBody,
-    assets: [...copiedAssets.values()],
     warnings,
   };
 }
@@ -240,26 +287,27 @@ function copyAssetIfNeeded(
   label: string,
   noteDir: string,
   context: RewriteContext,
-  copiedAssets: Map<string, ArticleAsset>,
   warnings: string[],
 ): string | null {
   if (!context.assetsDir) {
-    warnings.push(`assets_dir is not configured; leaving asset reference \`${target}\` unchanged`);
+    warnings.push(
+      formatRewriteWarning(context, `assets_dir is not configured; leaving asset reference \`${target}\` unchanged`),
+    );
     return null;
   }
 
   const resolvedSource = resolve(noteDir, target);
   if (!existsSync(resolvedSource)) {
-    warnings.push(`could not find asset \`${target}\``);
+    warnings.push(formatRewriteWarning(context, `could not find asset \`${target}\``));
     return null;
   }
 
   const filename = basename(resolvedSource);
-  const outputPath = join(context.assetsDir, context.note.slug, filename);
-  const publicUrl = joinUrl(context.assetUrlBase, context.note.slug, filename);
+  const outputPath = join(context.assetsDir, context.hostNote.slug, filename);
+  const publicUrl = joinUrl(context.assetUrlBase, context.hostNote.slug, filename);
 
-  if (!copiedAssets.has(resolvedSource)) {
-    copiedAssets.set(resolvedSource, {
+  if (!context.copiedAssets.has(resolvedSource)) {
+    context.copiedAssets.set(resolvedSource, {
       source_path: resolvedSource,
       output_path: outputPath,
       public_url: publicUrl,
@@ -467,15 +515,29 @@ function resolveLinkedSlug(
   );
 }
 
+function resolveLinkedNote(
+  target: string,
+  lookup: Map<string, NoteDocument>,
+  siblingLookup?: Map<string, NoteDocument>,
+): NoteDocument | undefined {
+  const normalized = normalizeLookupKey(stripExtension(target));
+  return (
+    lookup.get(normalized) ??
+    lookup.get(normalizeLookupKey(basename(stripExtension(target)))) ??
+    siblingLookup?.get(normalized) ??
+    siblingLookup?.get(normalizeLookupKey(basename(stripExtension(target))))
+  );
+}
+
 function stripExtension(path: string): string {
   const extension = extname(path);
   return extension.length > 0 ? path.slice(0, -extension.length) : path;
 }
 
-async function resolveSiblingLinkedSlug(
+async function resolveSiblingLinkedNote(
   noteDir: string,
   noteTarget: string,
-): Promise<string | undefined> {
+): Promise<NoteDocument | undefined> {
   for (const candidate of siblingNoteCandidates(noteDir, noteTarget)) {
     if (!existsSync(candidate)) {
       continue;
@@ -484,7 +546,7 @@ async function resolveSiblingLinkedSlug(
     const report = await scanNotes(candidate);
     const linked = report.notes[0];
     if (linked) {
-      return linked.slug;
+      return linked;
     }
   }
 
@@ -531,8 +593,67 @@ function slugFragment(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+function rewriteCallouts(body: string): string {
+  return body
+    .split("\n")
+    .map((line) => {
+      const match = line.match(/^>\s*\[!([^\]\s]+)\][+-]?\s*(.*)$/i);
+      if (!match) {
+        return line;
+      }
+
+      const [, kind, title] = match;
+      const label = kind ? `${kind.charAt(0).toUpperCase()}${kind.slice(1).toLowerCase()}` : "Note";
+      return title.trim().length > 0 ? `> **${label}:** ${title.trim()}` : `> **${label}**`;
+    })
+    .join("\n");
+}
+
 function isLocalAssetTarget(target: string): boolean {
   return !/^(?:https?:\/\/|mailto:|#|\/)/i.test(target);
+}
+
+function isLikelyNoteTarget(target: string): boolean {
+  if (!isLocalAssetTarget(target)) {
+    return false;
+  }
+
+  const extension = extname(target).toLowerCase();
+  return extension.length === 0 || extension === ".md" || extension === ".markdown";
+}
+
+function formatRewriteWarning(context: RewriteContext, message: string): string {
+  if (context.currentNote.source_path === context.hostNote.source_path) {
+    return message;
+  }
+
+  return `transclusion ${context.currentNote.relative_path}: ${message}`;
+}
+
+async function replaceAsync(
+  input: string,
+  pattern: RegExp,
+  replacer: (match: string, ...groups: string[]) => Promise<string>,
+): Promise<string> {
+  const matches = [...input.matchAll(pattern)];
+  if (matches.length === 0) {
+    return input;
+  }
+
+  const replacements = await Promise.all(
+    matches.map((match) => replacer(match[0], ...(match.slice(1) as string[]))),
+  );
+
+  let result = "";
+  let lastIndex = 0;
+  for (const [index, match] of matches.entries()) {
+    const start = match.index ?? 0;
+    result += input.slice(lastIndex, start);
+    result += replacements[index] ?? match[0];
+    lastIndex = start + match[0].length;
+  }
+  result += input.slice(lastIndex);
+  return result;
 }
 
 async function ensureAssetCopies(outputs: PublishNoteResult[]): Promise<void> {
