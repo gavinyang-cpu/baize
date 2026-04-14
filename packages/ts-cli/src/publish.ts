@@ -225,17 +225,25 @@ async function rewriteNoteBody(context: RewriteContext): Promise<{
     const { noteTarget, anchor } = splitAnchor(target);
     const transcludedNote = resolveLinkedNote(noteTarget, context.noteLookup, siblingLookup);
     if (transcludedNote) {
-      if (anchor) {
-        warnings.push(formatRewriteWarning(context, `transclusion anchors are not supported for \`${target}\``));
-      }
       if (context.visitedNotes.has(transcludedNote.source_path)) {
         warnings.push(formatRewriteWarning(context, `skipping cyclic transclusion \`${target}\``));
         return "";
       }
 
+      const transclusionBody = anchor
+        ? extractTransclusionBody(transcludedNote.body, anchor)
+        : transcludedNote.body;
+      if (transclusionBody === undefined) {
+        warnings.push(formatRewriteWarning(context, `could not resolve transclusion anchor \`${target}\``));
+        return full;
+      }
+
       const transcluded = await rewriteNoteBody({
         ...context,
-        currentNote: transcludedNote,
+        currentNote: {
+          ...transcludedNote,
+          body: transclusionBody,
+        },
         visitedNotes: new Set([...context.visitedNotes, transcludedNote.source_path]),
       });
       warnings.push(...transcluded.warnings);
@@ -501,20 +509,6 @@ function splitAnchor(target: string): { noteTarget: string; anchor?: string } {
   };
 }
 
-function resolveLinkedSlug(
-  target: string,
-  lookup: Map<string, string>,
-  siblingLookup?: Map<string, string>,
-): string | undefined {
-  const normalized = normalizeLookupKey(stripExtension(target));
-  return (
-    lookup.get(normalized) ??
-    lookup.get(normalizeLookupKey(basename(stripExtension(target)))) ??
-    siblingLookup?.get(normalized) ??
-    siblingLookup?.get(normalizeLookupKey(basename(stripExtension(target))))
-  );
-}
-
 function resolveLinkedNote(
   target: string,
   lookup: Map<string, NoteDocument>,
@@ -593,6 +587,105 @@ function slugFragment(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+function extractTransclusionBody(body: string, anchor: string): string | undefined {
+  if (anchor.startsWith("^")) {
+    return extractBlockTransclusion(body, anchor.slice(1));
+  }
+
+  return extractHeadingSection(body, anchor);
+}
+
+function extractHeadingSection(body: string, anchor: string): string | undefined {
+  const lines = body.split("\n");
+  const target = slugFragment(anchor);
+  let startIndex = -1;
+  let startDepth = 0;
+
+  for (const [index, line] of lines.entries()) {
+    const heading = parseHeading(line);
+    if (!heading) {
+      continue;
+    }
+
+    if (startIndex === -1) {
+      if (slugFragment(heading.title) === target) {
+        startIndex = index;
+        startDepth = heading.depth;
+      }
+      continue;
+    }
+
+    if (heading.depth <= startDepth) {
+      return lines.slice(startIndex, index).join("\n").trim();
+    }
+  }
+
+  if (startIndex === -1) {
+    return undefined;
+  }
+
+  return lines.slice(startIndex).join("\n").trim();
+}
+
+function extractBlockTransclusion(body: string, blockId: string): string | undefined {
+  const lines = body.split("\n");
+  let blockStart = 0;
+
+  for (let index = 0; index <= lines.length; index += 1) {
+    const current = lines[index] ?? "";
+    const isBoundary = index === lines.length || current.trim().length === 0;
+    if (!isBoundary) {
+      continue;
+    }
+
+    const blockLines = lines.slice(blockStart, index);
+    const extracted = stripBlockReference(blockLines, blockId);
+    if (extracted) {
+      return extracted.join("\n").trim();
+    }
+
+    blockStart = index + 1;
+  }
+
+  return undefined;
+}
+
+function stripBlockReference(lines: string[], blockId: string): string[] | undefined {
+  const marker = `^${blockId}`;
+  const escapedMarker = escapeRegExp(marker);
+  const inlinePattern = new RegExp(`^(.*?)(?:\\s+)?${escapedMarker}\\s*$`);
+  let matched = false;
+
+  const cleaned = lines.flatMap((line) => {
+    if (line.trim() === marker) {
+      matched = true;
+      return [];
+    }
+
+    const inlineMatch = line.match(inlinePattern);
+    if (inlineMatch) {
+      matched = true;
+      return [inlineMatch[1] ?? ""];
+    }
+
+    return [line];
+  });
+
+  return matched ? cleaned : undefined;
+}
+
+function parseHeading(line: string): { depth: number; title: string } | undefined {
+  const match = line.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
+  if (!match) {
+    return undefined;
+  }
+
+  return {
+    depth: match[1].length,
+    title: match[2] ?? "",
+  };
+}
+
 function rewriteCallouts(body: string): string {
   return body
     .split("\n")
@@ -628,6 +721,10 @@ function formatRewriteWarning(context: RewriteContext, message: string): string 
   }
 
   return `transclusion ${context.currentNote.relative_path}: ${message}`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function replaceAsync(

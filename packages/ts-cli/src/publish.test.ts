@@ -155,6 +155,103 @@ describe("publish pipeline", () => {
     expect(output).not.toContain("[!tip]");
   });
 
+  it("transcludes only the requested heading section", async () => {
+    const workspace = await createWorkspace();
+    const vault = join(workspace, "vault");
+    await mkdir(vault, { recursive: true });
+    await writeConfig(workspace);
+    const notePath = join(vault, "host.md");
+    await writeFile(
+      notePath,
+      "---\ntitle: Host\n---\nBefore section\n\n![[source#Details]]\n\nAfter section\n",
+      "utf8",
+    );
+    await writeFile(
+      join(vault, "source.md"),
+      [
+        "---",
+        "title: Source",
+        "---",
+        "# Intro",
+        "Intro body",
+        "",
+        "## Details",
+        "Body with [[linked-note|Reference]].",
+        "",
+        "### Nested",
+        "Nested body",
+        "",
+        "## Later",
+        "Do not include this.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(join(vault, "linked-note.md"), "---\ntitle: Linked Note\n---\nOther body\n", "utf8");
+
+    const result = await publishWithProfile(notePath, { cwd: workspace });
+
+    expect(result.status).toBe("success");
+    expect(result.warnings).toEqual([]);
+
+    const output = await readFile(
+      join(workspace, "site", "src", "content", "blog", "host.md"),
+      "utf8",
+    );
+    expect(output).toContain("Before section");
+    expect(output).toContain("## Details");
+    expect(output).toContain("### Nested");
+    expect(output).toContain("[Reference](/writing/linked-note)");
+    expect(output).not.toContain("## Later");
+    expect(output).not.toContain("Do not include this.");
+    expect(output).not.toContain("![[source#Details]]");
+  });
+
+  it("transcludes only the requested block reference", async () => {
+    const workspace = await createWorkspace();
+    const vault = join(workspace, "vault");
+    await mkdir(vault, { recursive: true });
+    await writeConfig(workspace);
+    const notePath = join(vault, "host.md");
+    await writeFile(
+      notePath,
+      "---\ntitle: Host\n---\n![[source#^quote-block]]\n",
+      "utf8",
+    );
+    await writeFile(
+      join(vault, "source.md"),
+      [
+        "---",
+        "title: Source",
+        "---",
+        "Before block",
+        "",
+        "> Quoted line one",
+        "> Quoted line two",
+        "^quote-block",
+        "",
+        "After block",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await publishWithProfile(notePath, { cwd: workspace });
+
+    expect(result.status).toBe("success");
+    expect(result.warnings).toEqual([]);
+
+    const output = await readFile(
+      join(workspace, "site", "src", "content", "blog", "host.md"),
+      "utf8",
+    );
+    expect(output).toContain("> Quoted line one");
+    expect(output).toContain("> Quoted line two");
+    expect(output).not.toContain("^quote-block");
+    expect(output).not.toContain("Before block");
+    expect(output).not.toContain("After block");
+  });
+
   it("runs the configured build hook during publish", async () => {
     const workspace = await createWorkspace();
     const vault = join(workspace, "vault");
