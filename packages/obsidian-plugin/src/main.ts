@@ -11,8 +11,8 @@ import {
 } from "obsidian";
 
 import { createArtifactLoader, generateAiArtifacts } from "../../ts-cli/src/ai.js";
-import { publishWithProfile } from "../../ts-cli/src/publish.js";
-import { setBaizeRuntimeRoot, validateNotes } from "../../ts-cli/src/rust.js";
+import { publishWithProfile, validateWithPublishRules } from "../../ts-cli/src/publish.js";
+import { setBaizeRuntimeRoot } from "../../ts-cli/src/rust.js";
 import {
   checkBaizeSetup,
   formatAiNotice,
@@ -131,7 +131,7 @@ export default class BaizePlugin extends Plugin {
 
   private async validatePath(targetPath: string): Promise<void> {
     await this.prepareRuntime(targetPath);
-    const result = await validateNotes(targetPath);
+    const result = await validateWithPublishRules(targetPath);
     new Notice(formatValidationNotice(result), result.exitCode === 2 ? 10000 : 8000);
   }
 

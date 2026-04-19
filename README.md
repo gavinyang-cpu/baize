@@ -425,6 +425,7 @@ Current validation is intentionally small but strict:
 
 - duplicate slugs are errors
 - parser-emitted note warnings are surfaced in validation output
+- TypeScript validation also warns on unresolved note links, unresolved note/transclusion anchors, and missing local assets
 
 Build behavior:
 

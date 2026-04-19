@@ -47,6 +47,17 @@ describe("TypeScript CLI", () => {
     expect(captured.stdout.join("\n")).toContain("Validation found 1 issue(s)");
   });
 
+  it("surfaces publish reference warnings during validate", async () => {
+    const vault = await createVault();
+    await writeFile(join(vault, "note.md"), "---\ntitle: Validate Me\n---\n[[missing-note]]\n", "utf8");
+
+    const captured: Captured = { stdout: [], stderr: [] };
+    const exitCode = await runCli(["validate", vault], createLogger(captured));
+
+    expect(exitCode).toBe(0);
+    expect(captured.stdout.join("\n")).toContain("could not resolve note link `missing-note`");
+  });
+
   it("creates a default config with init", async () => {
     const workspace = await createVault();
     const captured: Captured = { stdout: [], stderr: [] };

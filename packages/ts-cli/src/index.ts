@@ -15,7 +15,7 @@ export {
   writeDefaultConfig,
 } from "./config.js";
 export { createArtifactLoader, generateAiArtifacts } from "./ai.js";
-export { buildWithProfile, publishWithProfile } from "./publish.js";
+export { buildWithProfile, publishWithProfile, validateWithPublishRules } from "./publish.js";
 export { createBaizeMcpServer, startMcpServer } from "./mcp.js";
 export {
   aiToolInputSchema,

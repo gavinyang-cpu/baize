@@ -3,8 +3,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { createArtifactLoader, generateAiArtifacts } from "./ai.js";
 import { writeDefaultConfig } from "./config.js";
-import { publishWithProfile } from "./publish.js";
-import { buildNotes, scanNotes, validateNotes } from "./rust.js";
+import { publishWithProfile, validateWithPublishRules } from "./publish.js";
+import { buildNotes, scanNotes } from "./rust.js";
 
 const noteSummarySchema = z.object({
   relative_path: z.string(),
@@ -212,7 +212,7 @@ export async function handleScanTool({ path }: ScanToolArgs) {
 }
 
 export async function handleValidateTool({ path }: ValidateToolArgs) {
-  const result = await validateNotes(path);
+  const result = await validateWithPublishRules(path);
   const structuredContent = {
     path,
     exit_code: result.exitCode,

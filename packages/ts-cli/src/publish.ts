@@ -13,6 +13,7 @@ import type {
   PublishExecution,
   PublishMode,
   PublishNoteResult,
+  ValidationExecution,
   ValidationIssue,
 } from "./types.js";
 
@@ -34,6 +35,15 @@ type RewriteContext = {
   currentNote: NoteDocument;
   copiedAssets: Map<string, ArticleAsset>;
   visitedNotes: Set<string>;
+};
+
+type ReferenceValidationContext = {
+  rootNote: NoteDocument;
+  currentNote: NoteDocument;
+  noteLookup: Map<string, NoteDocument>;
+  primarySources: Set<string>;
+  visitedNotes: Set<string>;
+  issues: Set<string>;
 };
 
 export async function publishNotes(
@@ -117,6 +127,39 @@ export async function publishNotes(
   };
 }
 
+export async function validateWithPublishRules(path: string): Promise<ValidationExecution> {
+  const base = await validateNotes(path);
+  const scan = await scanNotes(path);
+  const noteLookup = buildNoteLookup(scan.notes);
+  const primarySources = new Set(scan.notes.map((note) => note.source_path));
+  const issues = [...base.report.issues];
+
+  for (const note of scan.notes) {
+    const referenceIssues = new Set<string>();
+    await collectReferenceIssues({
+      rootNote: note,
+      currentNote: note,
+      noteLookup,
+      primarySources,
+      visitedNotes: new Set([note.source_path]),
+      issues: referenceIssues,
+    });
+
+    for (const message of referenceIssues) {
+      issues.push({
+        level: "warning",
+        message,
+        note: note.relative_path,
+      });
+    }
+  }
+
+  return {
+    exitCode: base.exitCode,
+    report: { issues },
+  };
+}
+
 function buildFailedResult(
   profile: string,
   mode: PublishMode,
@@ -190,6 +233,85 @@ async function buildSiblingNoteLookup(
   }
 
   return lookup;
+}
+
+async function collectReferenceIssues(context: ReferenceValidationContext): Promise<void> {
+  const noteDir = dirname(context.currentNote.source_path);
+  const siblingLookup = await buildSiblingNoteLookup(context.currentNote, context.noteLookup);
+
+  for (const match of context.currentNote.body.matchAll(/!\[\[([^[\]]+)\]\]/g)) {
+    const rawTarget = match[1];
+    if (!rawTarget) {
+      continue;
+    }
+
+    const { target } = parseEmbedTarget(rawTarget);
+    const { noteTarget, anchor } = splitAnchor(target);
+    const transcludedNote = resolveLinkedNote(noteTarget, context.noteLookup, siblingLookup);
+    if (transcludedNote) {
+      const transclusionBody = anchor
+        ? extractTransclusionBody(transcludedNote.body, anchor)
+        : transcludedNote.body;
+      if (anchor && transclusionBody === undefined) {
+        context.issues.add(formatReferenceIssue(context, `could not resolve transclusion anchor \`${target}\``));
+        continue;
+      }
+
+      const shouldRecurse =
+        !context.primarySources.has(transcludedNote.source_path) &&
+        !context.visitedNotes.has(transcludedNote.source_path);
+      if (shouldRecurse) {
+        await collectReferenceIssues({
+          ...context,
+          currentNote: {
+            ...transcludedNote,
+            body: transclusionBody ?? transcludedNote.body,
+          },
+          visitedNotes: new Set([...context.visitedNotes, transcludedNote.source_path]),
+        });
+      }
+      continue;
+    }
+
+    if (isLocalAssetTarget(target) && !existsSync(resolve(noteDir, target))) {
+      context.issues.add(formatReferenceIssue(context, `could not find asset \`${target}\``));
+      continue;
+    }
+
+    if (isLikelyNoteTarget(noteTarget)) {
+      context.issues.add(formatReferenceIssue(context, `could not resolve embed target \`${target}\``));
+    }
+  }
+
+  for (const match of context.currentNote.body.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)) {
+    const target = match[2]?.trim();
+    if (!target || !isLocalAssetTarget(target)) {
+      continue;
+    }
+
+    if (!existsSync(resolve(noteDir, target))) {
+      context.issues.add(formatReferenceIssue(context, `could not find asset \`${target}\``));
+    }
+  }
+
+  for (const match of context.currentNote.body.matchAll(/\[\[([^[\]]+)\]\]/g)) {
+    const rawTarget = match[1];
+    if (!rawTarget) {
+      continue;
+    }
+
+    const { target } = parseEmbedTarget(rawTarget);
+    const { noteTarget, anchor } = splitAnchor(target);
+    const linkedNote = resolveLinkedNote(noteTarget, context.noteLookup, siblingLookup);
+    if (!linkedNote) {
+      context.issues.add(formatReferenceIssue(context, `could not resolve note link \`${target}\``));
+      continue;
+    }
+
+    if (anchor && extractTransclusionBody(linkedNote.body, anchor) === undefined) {
+      context.issues.add(formatReferenceIssue(context, `could not resolve note anchor \`${target}\``));
+    }
+  }
 }
 
 async function rewriteBody(body: string, context: RewriteContext): Promise<{
@@ -717,6 +839,14 @@ function isLikelyNoteTarget(target: string): boolean {
 
 function formatRewriteWarning(context: RewriteContext, message: string): string {
   if (context.currentNote.source_path === context.hostNote.source_path) {
+    return message;
+  }
+
+  return `transclusion ${context.currentNote.relative_path}: ${message}`;
+}
+
+function formatReferenceIssue(context: ReferenceValidationContext, message: string): string {
+  if (context.currentNote.source_path === context.rootNote.source_path) {
     return message;
   }
 

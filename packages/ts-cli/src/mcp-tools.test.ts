@@ -93,6 +93,17 @@ describe("MCP tool handlers", () => {
     expect(result.content[0]?.text).toContain("Validation found 1 issue(s)");
   });
 
+  it("includes publish reference warnings in validation output", async () => {
+    const vault = await createVault();
+    await writeFile(join(vault, "note.md"), "---\ntitle: MCP Validate\n---\n[[missing-note]]\n", "utf8");
+
+    const result = await handleValidateTool({ path: vault });
+
+    expect(result.structuredContent.exit_code).toBe(0);
+    expect(result.structuredContent.issue_count).toBe(1);
+    expect(result.structuredContent.issues[0]?.message).toContain("could not resolve note link `missing-note`");
+  });
+
   it("returns build outputs for valid notes", async () => {
     const vault = await createVault();
     const outDir = join(vault, "dist");

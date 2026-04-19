@@ -12,7 +12,7 @@ import {
   generateAiArtifacts,
   publishWithProfile,
   scanNotes,
-  validateNotes,
+  validateWithPublishRules,
 } from "./index.js";
 import type {
   AiGenerationExecution,
@@ -121,7 +121,7 @@ async function handleValidate(args: string[], logger: Logger): Promise<number> {
     return 1;
   }
 
-  const result = await validateNotes(path);
+  const result = await validateWithPublishRules(path);
   if (values.json) {
     logger.stdout(JSON.stringify(result.report, null, 2));
   } else {
