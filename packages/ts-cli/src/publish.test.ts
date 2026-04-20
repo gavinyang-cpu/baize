@@ -207,6 +207,48 @@ describe("publish pipeline", () => {
     expect(output).not.toContain("![[source#Details]]");
   });
 
+  it("preserves aliases on heading transclusions as Markdown labels", async () => {
+    const workspace = await createWorkspace();
+    const vault = join(workspace, "vault");
+    await mkdir(vault, { recursive: true });
+    await writeConfig(workspace);
+    const notePath = join(vault, "host.md");
+    await writeFile(
+      notePath,
+      "---\ntitle: Host\n---\n![[source#Details|Featured Details]]\n",
+      "utf8",
+    );
+    await writeFile(
+      join(vault, "source.md"),
+      [
+        "---",
+        "title: Source",
+        "---",
+        "## Details",
+        "Aliased body.",
+        "",
+        "## Later",
+        "Do not include this.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await publishWithProfile(notePath, { cwd: workspace });
+
+    expect(result.status).toBe("success");
+
+    const output = await readFile(
+      join(workspace, "site", "src", "content", "blog", "host.md"),
+      "utf8",
+    );
+    expect(output).toContain("**Featured Details**");
+    expect(output).toContain("## Details");
+    expect(output).toContain("Aliased body.");
+    expect(output).not.toContain("Do not include this.");
+    expect(output).not.toContain("![[source#Details|Featured Details]]");
+  });
+
   it("transcludes only the requested block reference", async () => {
     const workspace = await createWorkspace();
     const vault = join(workspace, "vault");

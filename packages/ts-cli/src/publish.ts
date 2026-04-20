@@ -369,7 +369,7 @@ async function rewriteNoteBody(context: RewriteContext): Promise<{
         visitedNotes: new Set([...context.visitedNotes, transcludedNote.source_path]),
       });
       warnings.push(...transcluded.warnings);
-      return `\n${transcluded.body.trim()}\n`;
+      return `\n${formatTranscludedBody(transcluded.body, label)}\n`;
     }
 
     const rewritten = copyAssetIfNeeded(target, label ?? basename(target), noteDir, context, warnings);
@@ -445,6 +445,16 @@ function copyAssetIfNeeded(
   }
 
   return `![${label}](${publicUrl})`;
+}
+
+function formatTranscludedBody(body: string, label?: string): string {
+  const trimmedBody = body.trim();
+  const trimmedLabel = label?.trim();
+  if (!trimmedLabel) {
+    return trimmedBody;
+  }
+
+  return `**${trimmedLabel}**\n\n${trimmedBody}`;
 }
 
 function renderAstroDocument(
