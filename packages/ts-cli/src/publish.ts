@@ -37,6 +37,11 @@ type RewriteContext = {
   visitedNotes: Set<string>;
 };
 
+type EmbedSize = {
+  width?: string;
+  height?: string;
+};
+
 type ReferenceValidationContext = {
   rootNote: NoteDocument;
   currentNote: NoteDocument;
@@ -343,7 +348,7 @@ async function rewriteNoteBody(context: RewriteContext): Promise<{
   const siblingLookup = await buildSiblingNoteLookup(context.currentNote, context.noteLookup);
 
   let nextBody = await replaceAsync(context.currentNote.body, /!\[\[([^[\]]+)\]\]/g, async (full, rawTarget: string) => {
-    const { target, label } = parseEmbedTarget(rawTarget);
+    const { target, label, size } = parseEmbedTarget(rawTarget);
     const { noteTarget, anchor } = splitAnchor(target);
     const transcludedNote = resolveLinkedNote(noteTarget, context.noteLookup, siblingLookup);
     if (transcludedNote) {
@@ -372,7 +377,14 @@ async function rewriteNoteBody(context: RewriteContext): Promise<{
       return `\n${formatTranscludedBody(transcluded.body, label)}\n`;
     }
 
-    const rewritten = copyAssetIfNeeded(target, label ?? basename(target), noteDir, context, warnings);
+    const rewritten = copyAssetIfNeeded({
+      target,
+      label: size ? basename(target) : (label ?? basename(target)),
+      size,
+      noteDir,
+      context,
+      warnings,
+    });
     return rewritten ?? full;
   });
 
@@ -382,7 +394,13 @@ async function rewriteNoteBody(context: RewriteContext): Promise<{
       return full;
     }
 
-    const rewritten = copyAssetIfNeeded(target, alt || basename(target), noteDir, context, warnings);
+    const rewritten = copyAssetIfNeeded({
+      target,
+      label: alt || basename(target),
+      noteDir,
+      context,
+      warnings,
+    });
     return rewritten ?? full;
   });
 
@@ -413,12 +431,16 @@ async function rewriteNoteBody(context: RewriteContext): Promise<{
 }
 
 function copyAssetIfNeeded(
-  target: string,
-  label: string,
-  noteDir: string,
-  context: RewriteContext,
-  warnings: string[],
+  options: {
+    target: string;
+    label: string;
+    size?: EmbedSize;
+    noteDir: string;
+    context: RewriteContext;
+    warnings: string[];
+  },
 ): string | null {
+  const { target, label, size, noteDir, context, warnings } = options;
   if (!context.assetsDir) {
     warnings.push(
       formatRewriteWarning(context, `assets_dir is not configured; leaving asset reference \`${target}\` unchanged`),
@@ -442,6 +464,18 @@ function copyAssetIfNeeded(
       output_path: outputPath,
       public_url: publicUrl,
     });
+  }
+
+  if (size?.width || size?.height) {
+    const attributes = [
+      `src="${publicUrl}"`,
+      `alt="${escapeHtmlAttribute(label)}"`,
+      size.width ? `width="${size.width}"` : undefined,
+      size.height ? `height="${size.height}"` : undefined,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" ");
+    return `<img ${attributes} />`;
   }
 
   return `![${label}](${publicUrl})`;
@@ -625,11 +659,13 @@ async function runBuildHook(command: string, cwd: string): Promise<string> {
   return output;
 }
 
-function parseEmbedTarget(rawTarget: string): { target: string; label?: string } {
+function parseEmbedTarget(rawTarget: string): { target: string; label?: string; size?: EmbedSize } {
   const [target, label] = rawTarget.split("|", 2);
+  const trimmedLabel = label?.trim();
   return {
     target: target.trim(),
-    label: label?.trim(),
+    label: trimmedLabel,
+    size: parseEmbedSize(trimmedLabel),
   };
 }
 
@@ -865,6 +901,35 @@ function formatReferenceIssue(context: ReferenceValidationContext, message: stri
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseEmbedSize(value?: string): EmbedSize | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const singleSize = value.match(/^(\d+)$/);
+  if (singleSize) {
+    return { width: singleSize[1] };
+  }
+
+  const dimensionSize = value.match(/^(?:(\d+))?x(?:(\d+))?$/i);
+  if (dimensionSize) {
+    const [, width, height] = dimensionSize;
+    if (width || height) {
+      return { width: width || undefined, height: height || undefined };
+    }
+  }
+
+  return undefined;
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 async function replaceAsync(

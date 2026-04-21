@@ -63,6 +63,54 @@ describe("publish pipeline", () => {
     expect(copiedAsset).toBe("fake image");
   });
 
+  it("preserves Obsidian image width embeds as HTML img tags", async () => {
+    const workspace = await createWorkspace();
+    const vault = join(workspace, "vault");
+    await mkdir(vault, { recursive: true });
+    await writeConfig(workspace);
+    await writeFile(
+      join(vault, "note.md"),
+      "---\ntitle: Main Note\n---\nBody ![[image.png|400]]\n",
+      "utf8",
+    );
+    await writeFile(join(vault, "image.png"), "fake image", "utf8");
+
+    const result = await buildWithProfile(vault, { cwd: workspace });
+
+    expect(result.status).toBe("success");
+
+    const noteOutput = await readFile(
+      join(workspace, "site", "src", "content", "blog", "main-note.md"),
+      "utf8",
+    );
+    expect(noteOutput).toContain('<img src="/images/posts/main-note/image.png" alt="image.png" width="400" />');
+  });
+
+  it("preserves Obsidian image width and height embeds as HTML img tags", async () => {
+    const workspace = await createWorkspace();
+    const vault = join(workspace, "vault");
+    await mkdir(vault, { recursive: true });
+    await writeConfig(workspace);
+    await writeFile(
+      join(vault, "note.md"),
+      "---\ntitle: Main Note\n---\nBody ![[image.png|320x180]]\n",
+      "utf8",
+    );
+    await writeFile(join(vault, "image.png"), "fake image", "utf8");
+
+    const result = await buildWithProfile(vault, { cwd: workspace });
+
+    expect(result.status).toBe("success");
+
+    const noteOutput = await readFile(
+      join(workspace, "site", "src", "content", "blog", "main-note.md"),
+      "utf8",
+    );
+    expect(noteOutput).toContain(
+      '<img src="/images/posts/main-note/image.png" alt="image.png" width="320" height="180" />',
+    );
+  });
+
   it("resolves sibling wikilinks during single-note publish", async () => {
     const workspace = await createWorkspace();
     const vault = join(workspace, "vault");

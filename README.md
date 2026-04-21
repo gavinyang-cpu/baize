@@ -20,7 +20,7 @@ What already works:
 - build Astro-ready Markdown files into a local output directory
 - create and load `baize.config.json` publish profiles
 - rewrite Obsidian wikilinks and local image embeds for Astro output
-- inline basic Obsidian note, heading, and block transclusions with aliases and normalize callouts for Astro output
+- inline basic Obsidian note, heading, and block transclusions with aliases, preserve Obsidian image sizing, and normalize callouts for Astro output
 - copy local assets into configured Astro public directories
 - generate AI summary, thread, and SEO artifacts with OpenAI or Ollama
 - publish through a profile-aware TypeScript CLI or MCP server
@@ -386,6 +386,7 @@ Current parser behavior:
 - if `publish.targets` is set and does not contain `astro`, the note gets a warning
 - unknown frontmatter keys are preserved in the parsed model
 - `![[note]]`, `![[note#Heading]]`, `![[note#^block-id]]`, and aliased variants such as `![[note#Heading|Label]]` are inlined when the target note can be resolved locally
+- `![[image.png|400]]` and `![[image.png|320x180]]` are rewritten as HTML `<img>` tags with width and height attributes
 - `> [!note]` style callouts are normalized into standard Markdown blockquotes
 
 ## Build Output
@@ -500,7 +501,7 @@ This is still a foundation release. Right now Baize does not yet:
 
 - support direct publish adapters beyond Astro
 - polish the Obsidian plugin beyond a desktop-first scaffold
-- handle richer Obsidian syntax such as partial block semantics and advanced embed variants
+- handle richer Obsidian syntax such as partial block semantics and less-common embed variants
 - expose a native library boundary between Rust and TypeScript
 - manage Astro collections or site config beyond path-based publishing
 
@@ -520,7 +521,7 @@ These files capture the product direction and implementation plans:
 Near-term priorities:
 
 1. Polish the Obsidian plugin workflow with richer status UI and safer setup checks.
-2. Add deeper Obsidian syntax support and stronger validation around advanced embed variants, anchors, links, and assets.
+2. Add deeper Obsidian syntax support and stronger validation around less-common embed variants, anchors, links, and assets.
 3. Decide whether to keep shell-out orchestration or move to a tighter Rust/TS integration boundary.
 
 ## License
